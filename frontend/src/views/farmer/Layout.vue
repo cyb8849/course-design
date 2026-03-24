@@ -29,6 +29,10 @@
           <el-icon><i-ep-data-analysis /></el-icon>
           <span>数据统计</span>
         </el-menu-item>
+        <el-menu-item index="/farmer/ai">
+          <el-icon><i-ep-magic-stick /></el-icon>
+          <span>AI智能助手</span>
+        </el-menu-item>
         <el-menu-item index="/login" @click="handleLogout">
           <el-icon><i-ep-switch-button /></el-icon>
           <span>退出登录</span>

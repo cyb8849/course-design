@@ -11,6 +11,7 @@ import com.lotus.service.LotusRootProductService;
 import com.lotus.service.OrderMainService;
 import com.lotus.service.OrderItemService;
 import com.lotus.service.TraceabilityInfoService;
+import com.lotus.service.impl.AIServiceImpl;
 import com.lotus.entity.TraceabilityInfo;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -59,6 +60,7 @@ public class FarmerController {
     private final TraceabilityInfoService traceabilityInfoService;
     private final OSS ossClient;
     private final OSSConfig ossConfig;
+    private final AIServiceImpl aiService;
 
     /**
      * 获取农户商品列表（分页+条件查询）
@@ -878,5 +880,233 @@ public class FarmerController {
         result.put("sales", sales);
         
         return ResultVO.success(result);
+    }
+
+    /**
+     * AI智能问答
+     * @param question 问题
+     * @return 回答
+     */
+    @PostMapping("/ai/chat")
+    public ResultVO<String> aiChat(@RequestBody Map<String, String> request) {
+        String question = request.get("question");
+        log.info("AI智能问答: question={}", question);
+        
+        if (question == null || question.isEmpty()) {
+            return ResultVO.error("请输入问题");
+        }
+        
+        String answer = aiService.chat(question);
+        return ResultVO.success(answer);
+    }
+
+    /**
+     * AI智能问答（流式）
+     * @param question 问题
+     * @return 流式回答
+     */
+    @PostMapping("/ai/chat/stream")
+    public void aiChatStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        String question = request.get("question");
+        log.info("AI智能问答（流式）: question={}", question);
+        
+        if (question == null || question.isEmpty()) {
+            try {
+                response.setContentType("text/event-stream");
+                response.setCharacterEncoding("UTF-8");
+                response.setHeader("Cache-Control", "no-cache");
+                response.setHeader("Connection", "keep-alive");
+                java.io.PrintWriter writer = response.getWriter();
+                writer.write("data: 请输入问题\n\n");
+                writer.flush();
+                writer.close();
+            } catch (Exception e) {
+                log.error("Error writing response: {}", e.getMessage());
+            }
+            return;
+        }
+        
+        try {
+            response.setContentType("text/event-stream");
+            response.setCharacterEncoding("UTF-8");
+            response.setHeader("Cache-Control", "no-cache");
+            response.setHeader("Connection", "keep-alive");
+            final java.io.PrintWriter writer = response.getWriter();
+            
+            aiService.doubaoStreamChat(question, chunk -> {
+                try {
+                    writer.write("data: " + chunk + "\n\n");
+                    writer.flush();
+                } catch (Exception e) {
+                    log.error("Error writing chunk: {}", e.getMessage());
+                }
+            });
+            
+            writer.write("data: [DONE]\n\n");
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            log.error("Error in streaming response: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * AI种植建议
+     * @param request 请求参数
+     * @return 种植建议
+     */
+    @PostMapping("/ai/planting-suggestion")
+    public ResultVO<String> aiPlantingSuggestion(@RequestBody Map<String, String> request) {
+        String crop = request.get("crop");
+        String soilType = request.get("soilType");
+        String season = request.get("season");
+        
+        log.info("AI种植建议: crop={}, soilType={}, season={}", crop, soilType, season);
+        
+        StringBuilder question = new StringBuilder("请为我提供关于");
+        if (crop != null && !crop.isEmpty()) {
+            question.append(crop);
+        } else {
+            question.append("莲藕");
+        }
+        question.append("的种植建议");
+        if (soilType != null && !soilType.isEmpty()) {
+            question.append("，土壤类型是").append(soilType);
+        }
+        if (season != null && !season.isEmpty()) {
+            question.append("，季节是").append(season);
+        }
+        question.append("。请包括种植时间、土壤准备、种植方法、施肥管理、病虫害防治等方面的详细建议。");
+        
+        String answer = aiService.chat(question.toString());
+        return ResultVO.success(answer);
+    }
+
+    /**
+     * AI种植建议（流式）
+     * @param request 请求参数
+     * @return 流式种植建议
+     */
+    @PostMapping("/ai/planting-suggestion/stream")
+    public void aiPlantingSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        String crop = request.get("crop");
+        String soilType = request.get("soilType");
+        String season = request.get("season");
+        
+        log.info("AI种植建议（流式）: crop={}, soilType={}, season={}", crop, soilType, season);
+        
+        StringBuilder question = new StringBuilder("请为我提供关于");
+        if (crop != null && !crop.isEmpty()) {
+            question.append(crop);
+        } else {
+            question.append("莲藕");
+        }
+        question.append("的种植建议");
+        if (soilType != null && !soilType.isEmpty()) {
+            question.append("，土壤类型是").append(soilType);
+        }
+        if (season != null && !season.isEmpty()) {
+            question.append("，季节是").append(season);
+        }
+        question.append("。请包括种植时间、土壤准备、种植方法、施肥管理、病虫害防治等方面的详细建议。");
+        
+        try {
+            response.setContentType("text/event-stream");
+            response.setCharacterEncoding("UTF-8");
+            response.setHeader("Cache-Control", "no-cache");
+            response.setHeader("Connection", "keep-alive");
+            final java.io.PrintWriter writer = response.getWriter();
+            
+            aiService.doubaoStreamChat(question.toString(), chunk -> {
+                try {
+                    writer.write("data: " + chunk + "\n\n");
+                    writer.flush();
+                } catch (Exception e) {
+                    log.error("Error writing chunk: {}", e.getMessage());
+                }
+            });
+            
+            writer.write("data: [DONE]\n\n");
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            log.error("Error in streaming response: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * AI销售建议
+     * @param request 请求参数
+     * @return 销售建议
+     */
+    @PostMapping("/ai/sales-suggestion")
+    public ResultVO<String> aiSalesSuggestion(@RequestBody Map<String, String> request) {
+        String product = request.get("product");
+        String targetMarket = request.get("targetMarket");
+        
+        log.info("AI销售建议: product={}, targetMarket={}", product, targetMarket);
+        
+        StringBuilder question = new StringBuilder("请为我提供关于");
+        if (product != null && !product.isEmpty()) {
+            question.append(product);
+        } else {
+            question.append("莲藕产品");
+        }
+        question.append("的销售建议");
+        if (targetMarket != null && !targetMarket.isEmpty()) {
+            question.append("，目标市场是").append(targetMarket);
+        }
+        question.append("。请包括定价策略、促销活动、销售渠道、品牌建设等方面的详细建议。");
+        
+        String answer = aiService.chat(question.toString());
+        return ResultVO.success(answer);
+    }
+
+    /**
+     * AI销售建议（流式）
+     * @param request 请求参数
+     * @return 流式销售建议
+     */
+    @PostMapping("/ai/sales-suggestion/stream")
+    public void aiSalesSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        String product = request.get("product");
+        String targetMarket = request.get("targetMarket");
+        
+        log.info("AI销售建议（流式）: product={}, targetMarket={}", product, targetMarket);
+        
+        StringBuilder question = new StringBuilder("请为我提供关于");
+        if (product != null && !product.isEmpty()) {
+            question.append(product);
+        } else {
+            question.append("莲藕产品");
+        }
+        question.append("的销售建议");
+        if (targetMarket != null && !targetMarket.isEmpty()) {
+            question.append("，目标市场是").append(targetMarket);
+        }
+        question.append("。请包括定价策略、促销活动、销售渠道、品牌建设等方面的详细建议。");
+        
+        try {
+            response.setContentType("text/event-stream");
+            response.setCharacterEncoding("UTF-8");
+            response.setHeader("Cache-Control", "no-cache");
+            response.setHeader("Connection", "keep-alive");
+            final java.io.PrintWriter writer = response.getWriter();
+            
+            aiService.doubaoStreamChat(question.toString(), chunk -> {
+                try {
+                    writer.write("data: " + chunk + "\n\n");
+                    writer.flush();
+                } catch (Exception e) {
+                    log.error("Error writing chunk: {}", e.getMessage());
+                }
+            });
+            
+            writer.write("data: [DONE]\n\n");
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            log.error("Error in streaming response: {}", e.getMessage());
+        }
     }
 }

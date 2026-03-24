@@ -124,6 +124,11 @@ const routes = [
         path: 'traceability',
         name: 'FarmerTraceability',
         component: () => import('../views/farmer/Traceability.vue')
+      },
+      {
+        path: 'ai',
+        name: 'FarmerAI',
+        component: () => import('../views/farmer/AI.vue')
       }
     ]
   },

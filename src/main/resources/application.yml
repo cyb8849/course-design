@@ -15,7 +15,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/lotus_shop?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
-    password: Chen136714
+    password: 123456
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
@@ -62,3 +62,12 @@ logging:
   level:
     com.lotus: debug
     org.springframework.security: debug
+
+# 国内AI服务配置
+ai:
+  deepseek:
+    api-key: ${DEEPSEEK_API_KEY:sk-7c95f97b20134ed6b3a15439a8e1d083}
+    base-url: ${DEEPSEEK_API_BASE_URL:https://api.deepseek.com/v1}
+  doubao:
+    api-key: ${DOUBAO_API_KEY:47c2d50c-075a-4df6-a8b0-5966e4ebc2e6}
+    base-url: ${DOUBAO_API_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
