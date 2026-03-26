@@ -64,6 +64,7 @@
       v-model="shipDialogVisible"
       :order-id="currentOrder?.id"
       :order-no="currentOrder?.orderNo"
+      :sub-order-id="currentOrder?.subOrderId"
       @success="handleShipSuccess"
     />
   </div>

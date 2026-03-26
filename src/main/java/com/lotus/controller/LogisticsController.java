@@ -1,5 +1,6 @@
 package com.lotus.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lotus.common.ResultVO;
 import com.lotus.entity.LogisticsInfo;
 import com.lotus.service.LogisticsInfoService;
@@ -25,20 +26,22 @@ public class LogisticsController {
     /**
      * 根据订单ID查询物流信息
      * @param orderId 订单ID
-     * @return 物流信息
+     * @return 物流信息列表
      */
     @GetMapping("/order/{orderId}")
-    public ResultVO<LogisticsInfo> getLogisticsByOrderId(@PathVariable Long orderId) {
+    public ResultVO<List<LogisticsInfo>> getLogisticsByOrderId(@PathVariable Long orderId) {
         log.info("查询订单物流信息: orderId={}", orderId);
         
         try {
-            LogisticsInfo logisticsInfo = logisticsInfoService.getByOrderId(orderId);
+            LambdaQueryWrapper<LogisticsInfo> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(LogisticsInfo::getOrderId, orderId);
+            List<LogisticsInfo> logisticsInfoList = logisticsInfoService.list(queryWrapper);
             
-            if (logisticsInfo == null) {
+            if (logisticsInfoList.isEmpty()) {
                 return ResultVO.error("该订单暂无物流信息");
             }
             
-            return ResultVO.success(logisticsInfo);
+            return ResultVO.success(logisticsInfoList);
         } catch (Exception e) {
             log.error("查询物流信息失败: orderId={}", orderId, e);
             return ResultVO.error("查询物流信息失败");
@@ -65,6 +68,7 @@ public class LogisticsController {
     /**
      * 创建物流信息（农户发货时使用）
      * @param orderId 订单ID
+     * @param orderSubId 子订单ID
      * @param expressCompany 快递公司代码
      * @param trackingNo 快递单号
      * @return 创建的物流信息
@@ -72,12 +76,13 @@ public class LogisticsController {
     @PostMapping("/create")
     public ResultVO<LogisticsInfo> createLogistics(
             @RequestParam Long orderId,
+            @RequestParam Long orderSubId,
             @RequestParam String expressCompany,
             @RequestParam String trackingNo) {
-        log.info("创建物流信息: orderId={}, expressCompany={}, trackingNo={}", orderId, expressCompany, trackingNo);
+        log.info("创建物流信息: orderId={}, orderSubId={}, expressCompany={}, trackingNo={}", orderId, orderSubId, expressCompany, trackingNo);
         
         try {
-            LogisticsInfo logisticsInfo = logisticsInfoService.createLogistics(orderId, expressCompany, trackingNo);
+            LogisticsInfo logisticsInfo = logisticsInfoService.createLogistics(orderId, orderSubId, expressCompany, trackingNo);
             return ResultVO.success(logisticsInfo);
         } catch (Exception e) {
             log.error("创建物流信息失败", e);

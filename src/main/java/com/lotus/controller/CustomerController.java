@@ -37,6 +37,8 @@ public class CustomerController {
     private final UserAddressService addressService;
     private final OrderMainService orderService;
     private final OrderItemService orderItemService;
+    private final OrderSubService orderSubService;
+    private final LogisticsInfoService logisticsInfoService;
     private final TraceabilityInfoService traceabilityService;
 
     /**
@@ -82,6 +84,8 @@ public class CustomerController {
             queryWrapper.orderByAsc(LotusRootProduct::getPrice);
         } else if ("price_desc".equals(sortBy)) {
             queryWrapper.orderByDesc(LotusRootProduct::getPrice);
+        } else if ("sales_desc".equals(sortBy)) {
+            queryWrapper.orderByDesc(LotusRootProduct::getSales);
         } else {
             // 默认按创建时间倒序
             queryWrapper.orderByDesc(LotusRootProduct::getCreateTime);
@@ -478,6 +482,38 @@ public class CustomerController {
         }
         log.info("成功保存 {} 个订单项", savedCount);
         
+        // 按农户分组创建子订单
+        Map<Long, List<OrderItem>> farmerItemsMap = new HashMap<>();
+        for (OrderItem item : orderItems) {
+            Long farmerId = item.getFarmerId();
+            if (!farmerItemsMap.containsKey(farmerId)) {
+                farmerItemsMap.put(farmerId, new ArrayList<>());
+            }
+            farmerItemsMap.get(farmerId).add(item);
+        }
+        
+        for (Map.Entry<Long, List<OrderItem>> entry : farmerItemsMap.entrySet()) {
+            Long farmerId = entry.getKey();
+            List<OrderItem> farmerItems = entry.getValue();
+            
+            // 计算子订单金额
+            BigDecimal subTotalAmount = BigDecimal.ZERO;
+            for (OrderItem item : farmerItems) {
+                subTotalAmount = subTotalAmount.add(item.getSubtotal());
+            }
+            
+            // 创建子订单
+            OrderSub orderSub = new OrderSub();
+            orderSub.setOrderId(orderMain.getId());
+            orderSub.setFarmerId(farmerId);
+            orderSub.setFarmerName("Farmer " + farmerId); // 实际应该从农户表获取
+            orderSub.setSubTotalAmount(subTotalAmount);
+            orderSub.setStatus("PENDING");
+            
+            orderSubService.save(orderSub);
+            log.info("创建子订单：farmerId={}, amount={}", farmerId, subTotalAmount);
+        }
+        
         // 清空购物车
         LambdaQueryWrapper<ShoppingCart> deleteWrapper = new LambdaQueryWrapper<>();
         deleteWrapper.eq(ShoppingCart::getUserId, orderMain.getUserId());
@@ -624,10 +660,41 @@ public class CustomerController {
         // 获取收货地址
         UserAddress address = addressService.getById(order.getAddressId());
         
+        // 获取子订单列表和物流信息
+        List<OrderSub> orderSubs = orderSubService.getByOrderId(orderId);
+        List<Map<String, Object>> subOrderList = new ArrayList<>();
+        
+        for (OrderSub sub : orderSubs) {
+            Map<String, Object> subMap = new HashMap<>();
+            subMap.put("id", sub.getId());
+            subMap.put("orderId", sub.getOrderId());
+            subMap.put("farmerId", sub.getFarmerId());
+            subMap.put("farmerName", sub.getFarmerName());
+            subMap.put("subTotalAmount", sub.getSubTotalAmount());
+            subMap.put("status", sub.getStatus());
+            subMap.put("paymentTime", sub.getPaymentTime());
+            subMap.put("shippingTime", sub.getShippingTime());
+            subMap.put("deliveryTime", sub.getDeliveryTime());
+            subMap.put("logisticsId", sub.getLogisticsId());
+            
+            // 获取物流信息
+            if (sub.getLogisticsId() != null) {
+                LambdaQueryWrapper<LogisticsInfo> logisticsWrapper = new LambdaQueryWrapper<>();
+                logisticsWrapper.eq(LogisticsInfo::getId, sub.getLogisticsId());
+                LogisticsInfo logisticsInfo = logisticsInfoService.getOne(logisticsWrapper);
+                if (logisticsInfo != null) {
+                    subMap.put("logisticsInfo", logisticsInfo);
+                }
+            }
+            
+            subOrderList.add(subMap);
+        }
+        
         Map<String, Object> result = new java.util.HashMap<>();
         result.put("order", order);
         result.put("items", orderItemsWithImage);
         result.put("address", address);
+        result.put("subOrders", subOrderList);
         
         return ResultVO.success(result);
     }
@@ -670,12 +737,22 @@ public class CustomerController {
             return ResultVO.error("订单状态不正确");
         }
         
+        // 更新主订单状态
         order.setStatus("PAID");
         order.setPaymentTime(LocalDateTime.now());
         
         boolean success = orderService.updateById(order);
         
         if (success) {
+            // 更新子订单状态
+            List<OrderSub> orderSubs = orderSubService.getByOrderId(orderId);
+            for (OrderSub sub : orderSubs) {
+                sub.setStatus("PAID");
+                sub.setPaymentTime(LocalDateTime.now());
+                orderSubService.updateById(sub);
+                log.info("更新子订单状态为已支付：subId={}, farmerId={}", sub.getId(), sub.getFarmerId());
+            }
+            
             return ResultVO.success("支付成功");
         } else {
             return ResultVO.error("支付失败");

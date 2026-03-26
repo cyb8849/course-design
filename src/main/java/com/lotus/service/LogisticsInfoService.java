@@ -19,13 +19,14 @@ public interface LogisticsInfoService extends IService<LogisticsInfo> {
     LogisticsInfo getByOrderId(Long orderId);
     
     /**
-     * 创建物流信息
+     * 创建物流信息（农户发货时使用）
      * @param orderId 订单ID
+     * @param orderSubId 子订单ID
      * @param expressCompany 快递公司代码
      * @param trackingNo 快递单号
      * @return 创建的物流信息
      */
-    LogisticsInfo createLogistics(Long orderId, String expressCompany, String trackingNo);
+    LogisticsInfo createLogistics(Long orderId, Long orderSubId, String expressCompany, String trackingNo);
     
     /**
      * 更新物流信息

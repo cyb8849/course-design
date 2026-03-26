@@ -63,32 +63,37 @@
         <template #header>
           <div class="card-header">
             <span>物流信息</span>
-            <el-tag v-if="logisticsInfo" :type="getLogisticsStatusType(logisticsInfo.status)">
-              {{ getLogisticsStatusText(logisticsInfo.status) }}
-            </el-tag>
-            <el-tag v-else type="info">暂无状态</el-tag>
           </div>
         </template>
-        <div v-if="logisticsInfo">
-          <div class="info-row">
-            <span class="label">快递公司：</span>
-            <span class="value">{{ logisticsInfo.expressCompanyName }}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">快递单号：</span>
-            <span class="value">{{ logisticsInfo.trackingNo }}</span>
-            <el-button size="small" type="primary" @click="copyTrackingNo">复制</el-button>
-          </div>
-          <div class="info-row">
-            <span class="label">最新状态：</span>
-            <span class="value">{{ logisticsInfo.latestInfo || '暂无更新' }}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">更新时间：</span>
-            <span class="value">{{ formatDate(logisticsInfo.latestTime) }}</span>
-          </div>
-          <div class="logistics-actions">
-            <el-button type="primary" @click="viewLogisticsDetail">查看物流详情</el-button>
+        <div v-if="logisticsInfoList && logisticsInfoList.length > 0">
+          <div v-for="(logistics, index) in logisticsInfoList" :key="logistics.id" class="logistics-item">
+            <div class="logistics-header">
+              <h4>物流 {{ index + 1 }}</h4>
+              <el-tag :type="getLogisticsStatusType(logistics.status)">
+                {{ getLogisticsStatusText(logistics.status) }}
+              </el-tag>
+            </div>
+            <div class="info-row">
+              <span class="label">快递公司：</span>
+              <span class="value">{{ logistics.expressCompanyName }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">快递单号：</span>
+              <span class="value">{{ logistics.trackingNo }}</span>
+              <el-button size="small" type="primary" @click="copyTrackingNo(logistics.trackingNo)">复制</el-button>
+            </div>
+            <div class="info-row">
+              <span class="label">最新状态：</span>
+              <span class="value">{{ logistics.latestInfo || '暂无更新' }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">更新时间：</span>
+              <span class="value">{{ formatDate(logistics.latestTime) }}</span>
+            </div>
+            <div class="logistics-actions">
+              <el-button type="primary" @click="viewLogisticsDetail(logistics.trackingNo, logistics.expressCompany)">查看物流详情</el-button>
+            </div>
+            <div v-if="index < logisticsInfoList.length - 1" class="logistics-divider"></div>
           </div>
         </div>
         <div v-else class="no-logistics">
@@ -169,7 +174,7 @@ const order = ref({
   orderItems: []
 })
 
-const logisticsInfo = ref(null)
+const logisticsInfoList = ref([])
 
 onMounted(async () => {
   if (userStore.isLoggedIn) {
@@ -224,11 +229,11 @@ const loadLogisticsInfo = async (orderId) => {
   try {
     const response = await axios.get(`/logistics/order/${orderId}`)
     if (response.data.code === 200) {
-      logisticsInfo.value = response.data.data
+      logisticsInfoList.value = response.data.data
     }
   } catch (error) {
     console.error('加载物流信息失败:', error)
-    logisticsInfo.value = null
+    logisticsInfoList.value = []
   }
 }
 
@@ -257,18 +262,18 @@ const getLogisticsStatusText = (status) => {
 }
 
 // 复制快递单号
-const copyTrackingNo = () => {
-  if (logisticsInfo.value?.trackingNo) {
-    navigator.clipboard.writeText(logisticsInfo.value.trackingNo)
+const copyTrackingNo = (trackingNo) => {
+  if (trackingNo) {
+    navigator.clipboard.writeText(trackingNo)
     ElMessage.success('快递单号已复制')
   }
 }
 
 // 查看物流详情
-const viewLogisticsDetail = () => {
+const viewLogisticsDetail = (trackingNo, expressCompany) => {
   router.push({
     path: '/logistics',
-    query: { orderNo: order.value.orderNo }
+    query: { trackingNo, expressCompany }
   })
 }
 
@@ -434,5 +439,36 @@ const goBack = () => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 30px;
+}
+
+.logistics-item {
+  margin-bottom: 20px;
+}
+
+.logistics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.logistics-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.logistics-divider {
+  height: 1px;
+  background-color: #e8e8e8;
+  margin: 20px 0;
+}
+
+.logistics-actions {
+  margin-top: 15px;
+  display: flex;
+  justify-content: flex-start;
 }
 </style>

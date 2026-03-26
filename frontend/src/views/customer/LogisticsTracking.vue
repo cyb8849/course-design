@@ -107,6 +107,9 @@ onMounted(() => {
   if (route.query.orderNo) {
     searchOrderNo.value = route.query.orderNo
     searchLogistics()
+  } else if (route.query.trackingNo && route.query.expressCompany) {
+    // 直接通过快递单号和快递公司查询物流轨迹
+    searchByTrackingNo(route.query.trackingNo, route.query.expressCompany)
   }
 })
 
@@ -210,6 +213,62 @@ const copyTrackingNo = () => {
     navigator.clipboard.writeText(logisticsInfo.value.trackingNo)
     ElMessage.success('快递单号已复制')
   }
+}
+
+// 通过快递单号和快递公司查询物流轨迹
+const searchByTrackingNo = async (trackingNo, expressCompany) => {
+  try {
+    // 查询物流轨迹
+    const trackingResponse = await axios.get('/logistics/tracking', {
+      params: {
+        trackingNo,
+        expressCompany
+      }
+    })
+    
+    if (trackingResponse.data.code === 200) {
+      trackingList.value = trackingResponse.data.data
+      
+      // 创建一个临时的物流信息对象
+      logisticsInfo.value = {
+        expressCompany,
+        expressCompanyName: getExpressCompanyName(expressCompany),
+        trackingNo,
+        status: 0,
+        latestInfo: trackingList.value.length > 0 ? trackingList.value[0].context : '暂无更新',
+        latestTime: trackingList.value.length > 0 ? trackingList.value[0].time : null
+      }
+    } else {
+      trackingList.value = []
+      logisticsInfo.value = null
+      ElMessage.info(trackingResponse.data.message || '暂无物流信息')
+    }
+    
+    searched.value = true
+  } catch (error) {
+    console.error('查询物流失败:', error)
+    ElMessage.error('查询物流失败')
+    searched.value = true
+    logisticsInfo.value = null
+    trackingList.value = []
+  }
+}
+
+// 获取快递公司名称
+const getExpressCompanyName = (code) => {
+  const companyMap = {
+    'SF': '顺丰速运',
+    'YTO': '圆通速递',
+    'ZTO': '中通快递',
+    'YUNDA': '韵达速递',
+    'EMS': 'EMS',
+    'JD': '京东物流',
+    'STO': '申通快递',
+    'HTKY': '百世快递',
+    'UC': '邮政快递',
+    'DBL': '德邦物流'
+  }
+  return companyMap[code] || '未知快递'
 }
 </script>
 

@@ -354,6 +354,7 @@ export const useStatisticsStore = defineStore('statistics', {
     farmerData: null,
     inventoryData: null,
     overviewData: null,
+    orderStatusData: null,
     loading: false
   }),
   actions: {
@@ -413,6 +414,18 @@ export const useStatisticsStore = defineStore('statistics', {
         const response = await axios.get('/admin/statistics/overview')
         this.overviewData = response.data.data
         return this.overviewData
+      } catch (error) {
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+    async getOrderStatusStatistics() {
+      this.loading = true
+      try {
+        const response = await axios.get('/admin/statistics/order-status')
+        this.orderStatusData = response.data.data
+        return this.orderStatusData
       } catch (error) {
         throw error
       } finally {

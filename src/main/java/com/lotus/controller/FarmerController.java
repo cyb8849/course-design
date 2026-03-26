@@ -7,11 +7,12 @@ import com.lotus.common.ResultVO;
 import com.lotus.entity.LotusRootProduct;
 import com.lotus.entity.OrderMain;
 import com.lotus.entity.OrderItem;
+import com.lotus.entity.OrderSub;
 import com.lotus.service.LotusRootProductService;
 import com.lotus.service.OrderMainService;
 import com.lotus.service.OrderItemService;
+import com.lotus.service.OrderSubService;
 import com.lotus.service.TraceabilityInfoService;
-import com.lotus.service.impl.AIServiceImpl;
 import com.lotus.entity.TraceabilityInfo;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -33,6 +34,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.lotus.service.impl.AIServiceImpl;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -57,6 +59,7 @@ public class FarmerController {
     private final LotusRootProductService productService;
     private final OrderMainService orderService;
     private final OrderItemService orderItemService;
+    private final OrderSubService orderSubService;
     private final TraceabilityInfoService traceabilityInfoService;
     private final OSS ossClient;
     private final OSSConfig ossConfig;
@@ -274,35 +277,26 @@ public class FarmerController {
         
         log.info("获取农户订单列表: farmerId={}, page={}, size={}", farmerId, page, size);
         
-        // 查询该农户的订单项
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getFarmerId, farmerId);
-        List<OrderItem> orderItems = orderItemService.list(itemWrapper);
-        
-        if (orderItems.isEmpty()) {
-            return ResultVO.success(new Page<>());
-        }
-        
-        // 获取订单ID列表
-        List<Long> orderIds = orderItems.stream()
-                .map(OrderItem::getOrderId)
-                .distinct()
-                .toList();
-        
-        // 分页查询订单
-        Page<OrderMain> pageInfo = new Page<>(page, size);
-        LambdaQueryWrapper<OrderMain> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.in(OrderMain::getId, orderIds);
+        // 查询该农户的子订单
+        LambdaQueryWrapper<OrderSub> subWrapper = new LambdaQueryWrapper<>();
+        subWrapper.eq(OrderSub::getFarmerId, farmerId);
         if (status != null && !status.isEmpty()) {
-            queryWrapper.eq(OrderMain::getStatus, status);
+            subWrapper.eq(OrderSub::getStatus, status);
         }
-        queryWrapper.orderByDesc(OrderMain::getCreateTime);
         
-        IPage<OrderMain> result = orderService.page(pageInfo, queryWrapper);
+        // 分页查询子订单
+        Page<OrderSub> pageInfo = new Page<>(page, size);
+        IPage<OrderSub> subResult = orderSubService.page(pageInfo, subWrapper);
         
         // 转换为包含订单项的订单列表
         List<Map<String, Object>> orderList = new ArrayList<>();
-        for (OrderMain order : result.getRecords()) {
+        for (OrderSub sub : subResult.getRecords()) {
+            // 查询主订单
+            OrderMain order = orderService.getById(sub.getOrderId());
+            if (order == null) {
+                continue;
+            }
+            
             Map<String, Object> orderMap = new HashMap<>();
             orderMap.put("id", order.getId());
             orderMap.put("orderNo", order.getOrderNo());
@@ -311,23 +305,25 @@ public class FarmerController {
             orderMap.put("receiverName", order.getReceiverName());
             orderMap.put("receiverPhone", order.getReceiverPhone());
             orderMap.put("receiverAddress", order.getReceiverAddress());
-            orderMap.put("totalAmount", order.getTotalAmount());
-            orderMap.put("status", order.getStatus());
-            orderMap.put("paymentTime", order.getPaymentTime());
-            orderMap.put("shippingTime", order.getShippingTime());
-            orderMap.put("deliveryTime", order.getDeliveryTime());
+            orderMap.put("totalAmount", sub.getSubTotalAmount());
+            orderMap.put("status", sub.getStatus());
+            orderMap.put("paymentTime", sub.getPaymentTime());
+            orderMap.put("shippingTime", sub.getShippingTime());
+            orderMap.put("deliveryTime", sub.getDeliveryTime());
             orderMap.put("createTime", order.getCreateTime());
             orderMap.put("updateTime", order.getUpdateTime());
+            orderMap.put("subOrderId", sub.getId());
+            orderMap.put("logisticsId", sub.getLogisticsId());
             
-            // 获取该农户相关的订单项
-            LambdaQueryWrapper<OrderItem> farmerItemWrapper = new LambdaQueryWrapper<>();
-            farmerItemWrapper.eq(OrderItem::getOrderId, order.getId());
-            farmerItemWrapper.eq(OrderItem::getFarmerId, farmerId);
-            List<OrderItem> farmerItems = orderItemService.list(farmerItemWrapper);
+            // 获取该子订单相关的订单项
+            LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
+            itemWrapper.eq(OrderItem::getOrderId, order.getId());
+            itemWrapper.eq(OrderItem::getFarmerId, farmerId);
+            List<OrderItem> orderItems = orderItemService.list(itemWrapper);
             
             // 为订单项添加商品图片信息
             List<Map<String, Object>> orderItemsWithImage = new ArrayList<>();
-            for (OrderItem item : farmerItems) {
+            for (OrderItem item : orderItems) {
                 Map<String, Object> itemMap = new HashMap<>();
                 itemMap.put("id", item.getId());
                 itemMap.put("orderId", item.getOrderId());
@@ -337,6 +333,8 @@ public class FarmerController {
                 itemMap.put("price", item.getPrice());
                 itemMap.put("quantity", item.getQuantity());
                 itemMap.put("subtotal", item.getSubtotal());
+                itemMap.put("status", item.getStatus());
+                itemMap.put("shippingTime", item.getShippingTime());
                 itemMap.put("createTime", item.getCreateTime());
                 
                 // 获取商品图片
@@ -354,7 +352,7 @@ public class FarmerController {
         }
         
         // 构建新的分页结果
-        Page<Map<String, Object>> newPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        Page<Map<String, Object>> newPage = new Page<>(subResult.getCurrent(), subResult.getSize(), subResult.getTotal());
         newPage.setRecords(orderList);
         
         return ResultVO.success(newPage);
@@ -430,49 +428,114 @@ public class FarmerController {
         orderMap.put("createTime", order.getCreateTime());
         orderMap.put("updateTime", order.getUpdateTime());
         
-        // 获取订单项
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> orderItems = orderItemService.list(itemWrapper);
+        // 获取子订单列表
+        List<OrderSub> orderSubs = orderSubService.getByOrderId(orderId);
+        List<Map<String, Object>> subOrderList = new ArrayList<>();
+        List<Map<String, Object>> allOrderItems = new ArrayList<>();
         
-        // 为订单项添加商品图片信息
-        List<Map<String, Object>> orderItemsWithImage = new ArrayList<>();
-        for (OrderItem item : orderItems) {
-            Map<String, Object> itemMap = new HashMap<>();
-            itemMap.put("id", item.getId());
-            itemMap.put("orderId", item.getOrderId());
-            itemMap.put("productId", item.getProductId());
-            itemMap.put("farmerId", item.getFarmerId());
-            itemMap.put("productName", item.getProductName());
-            itemMap.put("price", item.getPrice());
-            itemMap.put("quantity", item.getQuantity());
-            itemMap.put("subtotal", item.getSubtotal());
-            itemMap.put("createTime", item.getCreateTime());
+        for (OrderSub sub : orderSubs) {
+            Map<String, Object> subMap = new HashMap<>();
+            subMap.put("id", sub.getId());
+            subMap.put("orderId", sub.getOrderId());
+            subMap.put("farmerId", sub.getFarmerId());
+            subMap.put("farmerName", sub.getFarmerName());
+            subMap.put("subTotalAmount", sub.getSubTotalAmount());
+            subMap.put("status", sub.getStatus());
+            subMap.put("paymentTime", sub.getPaymentTime());
+            subMap.put("shippingTime", sub.getShippingTime());
+            subMap.put("deliveryTime", sub.getDeliveryTime());
+            subMap.put("logisticsId", sub.getLogisticsId());
             
-            // 获取商品图片
-            LotusRootProduct product = productService.getById(item.getProductId());
-            if (product != null) {
-                itemMap.put("productImage", product.getImageUrl());
+            // 获取该子订单相关的订单项
+            LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
+            itemWrapper.eq(OrderItem::getOrderId, orderId);
+            itemWrapper.eq(OrderItem::getFarmerId, sub.getFarmerId());
+            List<OrderItem> orderItems = orderItemService.list(itemWrapper);
+            
+            // 为订单项添加商品图片信息
+            List<Map<String, Object>> orderItemsWithImage = new ArrayList<>();
+            for (OrderItem item : orderItems) {
+                Map<String, Object> itemMap = new HashMap<>();
+                itemMap.put("id", item.getId());
+                itemMap.put("orderId", item.getOrderId());
+                itemMap.put("productId", item.getProductId());
+                itemMap.put("farmerId", item.getFarmerId());
+                itemMap.put("productName", item.getProductName());
+                itemMap.put("price", item.getPrice());
+                itemMap.put("quantity", item.getQuantity());
+                itemMap.put("subtotal", item.getSubtotal());
+                itemMap.put("createTime", item.getCreateTime());
+                
+                // 获取商品图片
+                LotusRootProduct product = productService.getById(item.getProductId());
+                if (product != null) {
+                    itemMap.put("productImage", product.getImageUrl());
+                }
+                
+                orderItemsWithImage.add(itemMap);
+                allOrderItems.add(itemMap);
             }
             
-            orderItemsWithImage.add(itemMap);
+            subMap.put("orderItems", orderItemsWithImage);
+            subOrderList.add(subMap);
         }
         
-        orderMap.put("orderItems", orderItemsWithImage);
+        orderMap.put("subOrders", subOrderList);
+        orderMap.put("orderItems", allOrderItems);
         
         return ResultVO.success(orderMap);
     }
     
     /**
-     * 订单发货
-     * @param orderId 订单ID
-     * @param request 发货信息
+     * 子订单发货
+     * @param subId 子订单ID
+     * @param logisticsId 物流信息ID
      * @return 发货结果
      */
-    @PostMapping("/order/{orderId}/ship")
-    public ResultVO<Void> shipOrder(
-            @PathVariable Long orderId,
-            @RequestBody Map<String, String> request) {
+    @PutMapping("/sub-orders/{subId}/ship")
+    public ResultVO<Void> shipOrderSub(@PathVariable Long subId, @RequestParam Long logisticsId) {
+        log.info("子订单发货: subId={}, logisticsId={}", subId, logisticsId);
+        
+        // 查询子订单
+        OrderSub orderSub = orderSubService.getById(subId);
+        if (orderSub == null) {
+            return ResultVO.notFound();
+        }
+        
+        // 检查子订单状态
+        if (!"PAID".equals(orderSub.getStatus())) {
+            return ResultVO.error("该子订单已经发货");
+        }
+        
+        // 发货子订单
+        boolean success = orderSubService.shipOrderSub(subId, logisticsId);
+        
+        if (success) {
+            // 更新该子订单下的所有订单项状态
+            LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
+            itemWrapper.eq(OrderItem::getOrderId, orderSub.getOrderId());
+            itemWrapper.eq(OrderItem::getFarmerId, orderSub.getFarmerId());
+            List<OrderItem> orderItems = orderItemService.list(itemWrapper);
+            
+            for (OrderItem item : orderItems) {
+                item.setStatus("SHIPPED");
+                item.setShippingTime(LocalDateTime.now());
+                orderItemService.updateById(item);
+            }
+            
+            return ResultVO.success("发货成功");
+        } else {
+            return ResultVO.error("发货失败");
+        }
+    }
+
+    /**
+     * 订单发货（兼容前端调用）
+     * @param orderId 订单ID
+     * @return 发货结果
+     */
+    @PutMapping("/orders/{orderId}/ship")
+    public ResultVO<Void> shipOrder(@PathVariable Long orderId) {
         log.info("订单发货: orderId={}", orderId);
         
         // 查询订单
@@ -486,43 +549,34 @@ public class FarmerController {
             return ResultVO.error("只有已支付的订单才能发货");
         }
         
-        // 更新订单状态
-        order.setStatus("SHIPPED");
-        order.setShippingTime(LocalDateTime.now());
+        // 获取该订单的所有子订单
+        List<OrderSub> orderSubs = orderSubService.getByOrderId(orderId);
         
-        // 保存订单
-        boolean success = orderService.updateById(order);
-        
-        if (success) {
-            return ResultVO.success("发货成功");
-        } else {
-            return ResultVO.error("发货失败");
-        }
-    }
-
-    /**
-     * 发货
-     * @param orderId 订单ID
-     * @return 发货结果
-     */
-    @PutMapping("/orders/{orderId}/ship")
-    public ResultVO<Void> shipOrder(@PathVariable Long orderId) {
-        log.info("发货: orderId={}", orderId);
-        
-        OrderMain order = orderService.getById(orderId);
-        if (order == null) {
-            return ResultVO.notFound();
+        if (orderSubs.isEmpty()) {
+            return ResultVO.error("订单无子订单");
         }
         
-        if (!"PAID".equals(order.getStatus())) {
-            return ResultVO.error("只有已支付的订单才能发货");
+        // 更新所有子订单状态为已发货
+        boolean allSuccess = true;
+        for (OrderSub sub : orderSubs) {
+            if ("PAID".equals(sub.getStatus())) {
+                // 这里简化处理，实际应该为每个子订单创建物流信息
+                // 这里只是更新子订单状态
+                sub.setStatus("SHIPPED");
+                sub.setShippingTime(LocalDateTime.now());
+                boolean success = orderSubService.updateById(sub);
+                if (!success) {
+                    allSuccess = false;
+                }
+            }
         }
         
-        order.setStatus("SHIPPED");
-        order.setShippingTime(LocalDateTime.now());
-        boolean success = orderService.updateById(order);
-        
-        if (success) {
+        if (allSuccess) {
+            // 更新订单状态为已发货
+            order.setStatus("SHIPPED");
+            order.setShippingTime(LocalDateTime.now());
+            orderService.updateById(order);
+            
             return ResultVO.success("发货成功");
         } else {
             return ResultVO.error("发货失败");
@@ -881,232 +935,168 @@ public class FarmerController {
         
         return ResultVO.success(result);
     }
-
+    
     /**
-     * AI智能问答
-     * @param question 问题
-     * @return 回答
-     */
-    @PostMapping("/ai/chat")
-    public ResultVO<String> aiChat(@RequestBody Map<String, String> request) {
-        String question = request.get("question");
-        log.info("AI智能问答: question={}", question);
-        
-        if (question == null || question.isEmpty()) {
-            return ResultVO.error("请输入问题");
-        }
-        
-        String answer = aiService.chat(question);
-        return ResultVO.success(answer);
-    }
-
-    /**
-     * AI智能问答（流式）
+     * 智能问答流式接口
      * @param question 问题
      * @return 流式回答
      */
     @PostMapping("/ai/chat/stream")
-    public void aiChatStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
-        String question = request.get("question");
-        log.info("AI智能问答（流式）: question={}", question);
+    public void chatStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        log.info("AI chat stream request: {}", request.get("question"));
         
-        if (question == null || question.isEmpty()) {
-            try {
-                response.setContentType("text/event-stream");
-                response.setCharacterEncoding("UTF-8");
-                response.setHeader("Cache-Control", "no-cache");
-                response.setHeader("Connection", "keep-alive");
-                java.io.PrintWriter writer = response.getWriter();
-                writer.write("data: 请输入问题\n\n");
-                writer.flush();
-                writer.close();
-            } catch (Exception e) {
-                log.error("Error writing response: {}", e.getMessage());
-            }
-            return;
-        }
+        response.setContentType("text/event-stream");
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
         
         try {
-            response.setContentType("text/event-stream");
-            response.setCharacterEncoding("UTF-8");
-            response.setHeader("Cache-Control", "no-cache");
-            response.setHeader("Connection", "keep-alive");
-            final java.io.PrintWriter writer = response.getWriter();
+            String question = request.get("question");
+            if (question == null || question.isEmpty()) {
+                response.getWriter().write("data: 请输入问题\n\n");
+                response.getWriter().flush();
+                return;
+            }
             
+            // 使用AI服务进行流式回答
             aiService.doubaoStreamChat(question, chunk -> {
                 try {
-                    writer.write("data: " + chunk + "\n\n");
-                    writer.flush();
+                    response.getWriter().write("data: " + chunk + "\n\n");
+                    response.getWriter().flush();
                 } catch (Exception e) {
-                    log.error("Error writing chunk: {}", e.getMessage());
+                    log.error("Error writing to response: {}", e.getMessage());
                 }
             });
             
-            writer.write("data: [DONE]\n\n");
-            writer.flush();
-            writer.close();
+            // 发送结束标记
+            response.getWriter().write("data: [DONE]\n\n");
+            response.getWriter().flush();
         } catch (Exception e) {
-            log.error("Error in streaming response: {}", e.getMessage());
+            log.error("AI chat stream failed: {}", e.getMessage());
+            try {
+                response.getWriter().write("data: AI服务暂时不可用，请稍后再试\n\n");
+                response.getWriter().flush();
+            } catch (Exception ex) {
+                log.error("Error writing error message: {}", ex.getMessage());
+            }
         }
     }
-
+    
     /**
-     * AI种植建议
-     * @param request 请求参数
-     * @return 种植建议
-     */
-    @PostMapping("/ai/planting-suggestion")
-    public ResultVO<String> aiPlantingSuggestion(@RequestBody Map<String, String> request) {
-        String crop = request.get("crop");
-        String soilType = request.get("soilType");
-        String season = request.get("season");
-        
-        log.info("AI种植建议: crop={}, soilType={}, season={}", crop, soilType, season);
-        
-        StringBuilder question = new StringBuilder("请为我提供关于");
-        if (crop != null && !crop.isEmpty()) {
-            question.append(crop);
-        } else {
-            question.append("莲藕");
-        }
-        question.append("的种植建议");
-        if (soilType != null && !soilType.isEmpty()) {
-            question.append("，土壤类型是").append(soilType);
-        }
-        if (season != null && !season.isEmpty()) {
-            question.append("，季节是").append(season);
-        }
-        question.append("。请包括种植时间、土壤准备、种植方法、施肥管理、病虫害防治等方面的详细建议。");
-        
-        String answer = aiService.chat(question.toString());
-        return ResultVO.success(answer);
-    }
-
-    /**
-     * AI种植建议（流式）
-     * @param request 请求参数
-     * @return 流式种植建议
+     * 种植建议流式接口
+     * @param request 种植信息
+     * @return 流式建议
      */
     @PostMapping("/ai/planting-suggestion/stream")
-    public void aiPlantingSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
-        String crop = request.get("crop");
-        String soilType = request.get("soilType");
-        String season = request.get("season");
+    public void plantingSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        log.info("AI planting suggestion stream request: {}", request);
         
-        log.info("AI种植建议（流式）: crop={}, soilType={}, season={}", crop, soilType, season);
-        
-        StringBuilder question = new StringBuilder("请为我提供关于");
-        if (crop != null && !crop.isEmpty()) {
-            question.append(crop);
-        } else {
-            question.append("莲藕");
-        }
-        question.append("的种植建议");
-        if (soilType != null && !soilType.isEmpty()) {
-            question.append("，土壤类型是").append(soilType);
-        }
-        if (season != null && !season.isEmpty()) {
-            question.append("，季节是").append(season);
-        }
-        question.append("。请包括种植时间、土壤准备、种植方法、施肥管理、病虫害防治等方面的详细建议。");
+        response.setContentType("text/event-stream");
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
         
         try {
-            response.setContentType("text/event-stream");
-            response.setCharacterEncoding("UTF-8");
-            response.setHeader("Cache-Control", "no-cache");
-            response.setHeader("Connection", "keep-alive");
-            final java.io.PrintWriter writer = response.getWriter();
+            String crop = request.get("crop");
+            String soilType = request.get("soilType");
+            String season = request.get("season");
             
+            if (crop == null || crop.isEmpty()) {
+                response.getWriter().write("data: 请输入作物名称\n\n");
+                response.getWriter().flush();
+                return;
+            }
+            
+            // 构建问题
+            StringBuilder question = new StringBuilder();
+            question.append("请提供关于");
+            question.append(crop);
+            if (soilType != null && !soilType.isEmpty()) {
+                question.append("在").append(soilType);
+            }
+            if (season != null && !season.isEmpty()) {
+                question.append(season);
+            }
+            question.append("的详细种植建议，包括种植时间、土壤准备、播种方法、施肥方案、病虫害防治等方面。");
+            
+            // 使用AI服务进行流式回答
             aiService.doubaoStreamChat(question.toString(), chunk -> {
                 try {
-                    writer.write("data: " + chunk + "\n\n");
-                    writer.flush();
+                    response.getWriter().write("data: " + chunk + "\n\n");
+                    response.getWriter().flush();
                 } catch (Exception e) {
-                    log.error("Error writing chunk: {}", e.getMessage());
+                    log.error("Error writing to response: {}", e.getMessage());
                 }
             });
             
-            writer.write("data: [DONE]\n\n");
-            writer.flush();
-            writer.close();
+            // 发送结束标记
+            response.getWriter().write("data: [DONE]\n\n");
+            response.getWriter().flush();
         } catch (Exception e) {
-            log.error("Error in streaming response: {}", e.getMessage());
+            log.error("AI planting suggestion stream failed: {}", e.getMessage());
+            try {
+                response.getWriter().write("data: AI服务暂时不可用，请稍后再试\n\n");
+                response.getWriter().flush();
+            } catch (Exception ex) {
+                log.error("Error writing error message: {}", ex.getMessage());
+            }
         }
     }
-
+    
     /**
-     * AI销售建议
-     * @param request 请求参数
-     * @return 销售建议
-     */
-    @PostMapping("/ai/sales-suggestion")
-    public ResultVO<String> aiSalesSuggestion(@RequestBody Map<String, String> request) {
-        String product = request.get("product");
-        String targetMarket = request.get("targetMarket");
-        
-        log.info("AI销售建议: product={}, targetMarket={}", product, targetMarket);
-        
-        StringBuilder question = new StringBuilder("请为我提供关于");
-        if (product != null && !product.isEmpty()) {
-            question.append(product);
-        } else {
-            question.append("莲藕产品");
-        }
-        question.append("的销售建议");
-        if (targetMarket != null && !targetMarket.isEmpty()) {
-            question.append("，目标市场是").append(targetMarket);
-        }
-        question.append("。请包括定价策略、促销活动、销售渠道、品牌建设等方面的详细建议。");
-        
-        String answer = aiService.chat(question.toString());
-        return ResultVO.success(answer);
-    }
-
-    /**
-     * AI销售建议（流式）
-     * @param request 请求参数
-     * @return 流式销售建议
+     * 销售建议流式接口
+     * @param request 销售信息
+     * @return 流式建议
      */
     @PostMapping("/ai/sales-suggestion/stream")
-    public void aiSalesSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
-        String product = request.get("product");
-        String targetMarket = request.get("targetMarket");
+    public void salesSuggestionStream(@RequestBody Map<String, String> request, jakarta.servlet.http.HttpServletResponse response) {
+        log.info("AI sales suggestion stream request: {}", request);
         
-        log.info("AI销售建议（流式）: product={}, targetMarket={}", product, targetMarket);
-        
-        StringBuilder question = new StringBuilder("请为我提供关于");
-        if (product != null && !product.isEmpty()) {
-            question.append(product);
-        } else {
-            question.append("莲藕产品");
-        }
-        question.append("的销售建议");
-        if (targetMarket != null && !targetMarket.isEmpty()) {
-            question.append("，目标市场是").append(targetMarket);
-        }
-        question.append("。请包括定价策略、促销活动、销售渠道、品牌建设等方面的详细建议。");
+        response.setContentType("text/event-stream");
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
         
         try {
-            response.setContentType("text/event-stream");
-            response.setCharacterEncoding("UTF-8");
-            response.setHeader("Cache-Control", "no-cache");
-            response.setHeader("Connection", "keep-alive");
-            final java.io.PrintWriter writer = response.getWriter();
+            String product = request.get("product");
+            String targetMarket = request.get("targetMarket");
             
+            if (product == null || product.isEmpty()) {
+                response.getWriter().write("data: 请输入产品名称\n\n");
+                response.getWriter().flush();
+                return;
+            }
+            
+            // 构建问题
+            StringBuilder question = new StringBuilder();
+            question.append("请提供关于");
+            question.append(product);
+            if (targetMarket != null && !targetMarket.isEmpty()) {
+                question.append("在").append(targetMarket);
+            }
+            question.append("的详细销售建议，包括定价策略、营销策略、渠道选择、促销活动等方面。");
+            
+            // 使用AI服务进行流式回答
             aiService.doubaoStreamChat(question.toString(), chunk -> {
                 try {
-                    writer.write("data: " + chunk + "\n\n");
-                    writer.flush();
+                    response.getWriter().write("data: " + chunk + "\n\n");
+                    response.getWriter().flush();
                 } catch (Exception e) {
-                    log.error("Error writing chunk: {}", e.getMessage());
+                    log.error("Error writing to response: {}", e.getMessage());
                 }
             });
             
-            writer.write("data: [DONE]\n\n");
-            writer.flush();
-            writer.close();
+            // 发送结束标记
+            response.getWriter().write("data: [DONE]\n\n");
+            response.getWriter().flush();
         } catch (Exception e) {
-            log.error("Error in streaming response: {}", e.getMessage());
+            log.error("AI sales suggestion stream failed: {}", e.getMessage());
+            try {
+                response.getWriter().write("data: AI服务暂时不可用，请稍后再试\n\n");
+                response.getWriter().flush();
+            } catch (Exception ex) {
+                log.error("Error writing error message: {}", ex.getMessage());
+            }
         }
     }
 }

@@ -18,6 +18,9 @@ public class LogisticsInfo {
     @TableField("order_id")
     private Long orderId;
     
+    @TableField("order_sub_id")
+    private Long orderSubId;
+    
     /**
      * 快递公司代码
      * 如：SF(顺丰)、YTO(圆通)、ZTO(中通)等

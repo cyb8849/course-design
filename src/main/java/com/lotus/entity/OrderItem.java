@@ -22,6 +22,9 @@ public class OrderItem {
     private BigDecimal price;
     private Integer quantity;
     private BigDecimal subtotal;
+    private String status;
+    @TableField("shipping_time")
+    private LocalDateTime shippingTime;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 }

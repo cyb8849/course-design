@@ -52,7 +52,8 @@ import axios from 'axios'
 const props = defineProps({
   modelValue: Boolean,
   orderId: Number,
-  orderNo: String
+  orderNo: String,
+  subOrderId: Number
 })
 
 const emit = defineEmits(['update:modelValue', 'success'])
@@ -112,6 +113,7 @@ const handleShip = async () => {
     const logisticsResponse = await axios.post('/logistics/create', null, {
       params: {
         orderId: props.orderId,
+        orderSubId: props.subOrderId,
         expressCompany: form.expressCompany,
         trackingNo: form.trackingNo
       }
@@ -122,8 +124,11 @@ const handleShip = async () => {
       return
     }
     
-    // 2. 更新订单状态为已发货
-    const shipResponse = await axios.put(`/farmer/orders/${props.orderId}/ship`, null, {
+    // 2. 更新子订单状态为已发货
+    const shipResponse = await axios.put(`/farmer/sub-orders/${props.subOrderId}/ship`, null, {
+      params: {
+        logisticsId: logisticsResponse.data.data.id
+      },
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`
       }
